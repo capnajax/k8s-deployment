@@ -22,22 +22,25 @@ function runDocker {
 }
 
 lastUpdateId=0
+lastUpdatePod=''
 
 function getLastUpdateId {
 	local setBaseline=$([ -z "${1}" ] && echo false || echo $1)
-	local updateKey=$($updateTestId)
-	if [ $? == 0 ]; then
-		if $setBaseline; then
-			echo "Previously update: ${updateKey}"
-		fi
-	else
-		updateKey=0
+	local updateKey=$(kubectl get pods --selector=${podSelector} -o jsonpath="{.items[?(.status.phase=='Running')]['status.phase', 'metadata.name']}")
+	if [ -z "${updateKey}" ]; then
+		# means there is not pod with this selector
+		updateKey="no_pod"
 		if $setBaseline; then
 			lastUpdateId=${updateKey}
 			echo "Previous update unknown, ${appName} not running"
 		fi
+	else
+		if $setBaseline; then
+			echo "Previous update: ${updateKey}"
+			lastUpdateId=${updateKey}
+		fi
 	fi
-	if $setBaseline || [ $lastUpdateId == $epoch ]; then
+	if $setBaseline || [ "${lastUpdateId}" == "${updateKey}" ]; then
 		return 0
 	else
 		return 1
@@ -100,10 +103,7 @@ if [ "${deploymentProcess}" == "kubernetes" ]; then
 	echo DEPLOYMENT COMPLETE
 	if [ -z "${appDeployment}" ]; then
 		true
-	elif [ -z "${updateTestId}" ]; then
-		echo Started deployment restart.
 	else
-		echo Restarting container...
 		echo -n Restarting deployment...
 	fi
 elif [ "${deploymentProcess}" == "rsync" ]; then
@@ -114,11 +114,11 @@ else
 fi
 
 # await the lastUpdateId to change
-if [ ! -z "${appDeployment}" ] && [ ! -z ${updateTestId} ]; then
+if [ ! -z "${appDeployment}" ] && [ ! -z "${updateTestId}" ]; then
 	while getLastUpdateId; do
 		sleep 1
 		echo -n .
 	done
 	echo done.
 fi
-
+kubectl get pods --selector=${podSelector}
